@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'Sold Equipment',
   description: 'Smart sold-equipment pipeline + warehouse board (replaces EQUIP SOLD Zap)',
-  manifest: '/manifest.json',
+  manifest: '/sold-equipment/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
