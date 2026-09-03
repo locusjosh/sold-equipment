@@ -3,35 +3,17 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { StatusPill } from '@/components/StatusPill';
-
-type Sold = {
-  id: string;
-  estimateId: string;
-  locationName: string;
-  jobNumber: string | null;
-  skus: string[];
-  total: number | null;
-  statusOps: string;
-  statusWarehouse: string;
-  statusReq: string;
-  a2lFlag: boolean;
-  createdAt: string;
-};
+import { getSoldRows, type SoldRow } from '@/lib/demo/store';
 
 export default function SoldQueuePage() {
-  const [rows, setRows] = useState<Sold[]>([]);
+  const [rows, setRows] = useState<SoldRow[]>([]);
   const [statusOps, setStatusOps] = useState('');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
 
-  async function load(nextQ = q, nextStatus = statusOps) {
+  function load(nextQ = q, nextStatus = statusOps) {
     setLoading(true);
-    const params = new URLSearchParams();
-    if (nextQ) params.set('q', nextQ);
-    if (nextStatus) params.set('statusOps', nextStatus);
-    const res = await fetch(`/api/sold?${params}`);
-    const data = await res.json();
-    setRows(data);
+    setRows(getSoldRows({ q: nextQ || undefined, statusOps: nextStatus || undefined }));
     setLoading(false);
   }
 
@@ -45,7 +27,7 @@ export default function SoldQueuePage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Sold queue</h1>
-          <p className="text-sm text-zinc-400">Ops accuracy gate — auto vs escalate</p>
+          <p className="text-sm text-zinc-400">Ops accuracy gate — auto vs escalate (static seed)</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <input
@@ -78,9 +60,7 @@ export default function SoldQueuePage() {
       {loading ? (
         <p className="text-sm text-zinc-500">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-zinc-500">
-          No rows. <a className="text-emerald-400 underline" href="/api/demo/seed">Seed demo data</a>
-        </p>
+        <p className="text-sm text-zinc-500">No rows match filters.</p>
       ) : (
         <ul className="space-y-3">
           {rows.map((r) => (

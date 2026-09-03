@@ -1,16 +1,21 @@
+'use client';
+
 import Link from 'next/link';
+import { resetDemoData } from '@/lib/demo/store';
 
 export default function HomePage() {
   return (
     <div className="space-y-8">
       <section className="rounded-2xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-6 sm:p-8">
-        <p className="text-sm uppercase tracking-widest text-emerald-400/80">Demo mode</p>
+        <p className="text-sm uppercase tracking-widest text-emerald-400/80">Static demo</p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
           Sold Equipment MVP
         </h1>
         <p className="mt-3 max-w-2xl text-zinc-400">
           Replaces the Zapier EQUIP SOLD Zap with smart auto-approve, a sold queue,
-          and the warehouse installs board. Runs locally with SQLite — no secrets required.
+          and the warehouse installs board. This GitHub Pages build uses client-side
+          seed data (localStorage for Loaded / status overrides) — API routes and
+          Prisma are not available on static hosting.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link
@@ -37,16 +42,16 @@ export default function HomePage() {
       <section className="grid gap-4 sm:grid-cols-3">
         {[
           {
-            title: '1. Ingest',
-            body: 'POST /api/sold/ingest runs the v1 rule engine and dry-runs Slack.',
+            title: '1. Seed',
+            body: 'Eight demo sold estimates evaluated by the v1 rule engine at build/load time.',
           },
           {
             title: '2. Ops gate',
-            body: 'SAFE pairs auto-approve; Hue97 / Indigo / mismatches escalate.',
+            body: 'SAFE pairs auto-approve; Hue97 / Indigo / mismatches escalate. Override locally.',
           },
           {
             title: '3. Warehouse',
-            body: 'Auto installs land on the board; mark loaded / ready from the UI.',
+            body: 'Auto installs land on the board; mark loaded / ready (persisted in localStorage).',
           },
         ].map((c) => (
           <div key={c.title} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
@@ -56,12 +61,16 @@ export default function HomePage() {
         ))}
       </section>
 
-      <a
-        href="/api/demo/seed"
+      <button
+        type="button"
+        onClick={() => {
+          resetDemoData();
+          window.location.reload();
+        }}
         className="inline-flex rounded-lg border border-dashed border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:border-emerald-600 hover:text-emerald-300"
       >
-        Load / refresh demo seed
-      </a>
+        Reset demo overrides (localStorage)
+      </button>
     </div>
   );
 }

@@ -2,31 +2,26 @@
 
 import { useEffect, useState } from 'react';
 import { StatusPill } from '@/components/StatusPill';
-
-type Install = {
-  id: string;
-  estimateId: string | null;
-  equipment: string;
-  customer: string;
-  dateApproved: string;
-  status: string;
-  loadedAt: string | null;
-  scheduledDate: string | null;
-  assignedTechs: string[];
-  installJobNumber: string | null;
-};
+import {
+  clearLoaded,
+  getInstallRows,
+  markLoaded,
+  updateInstall,
+  type InstallRow,
+} from '@/lib/demo/store';
 
 export default function WarehousePage() {
-  const [rows, setRows] = useState<Install[]>([]);
+  const [rows, setRows] = useState<InstallRow[]>([]);
   const [filter, setFilter] = useState('all');
   const [status, setStatus] = useState('');
 
-  async function load(f = filter, s = status) {
-    const params = new URLSearchParams();
-    if (f && f !== 'all') params.set('filter', f);
-    if (s) params.set('status', s);
-    const res = await fetch(`/api/installs?${params}`);
-    setRows(await res.json());
+  function load(f = filter, s = status) {
+    setRows(
+      getInstallRows({
+        filter: f && f !== 'all' ? f : undefined,
+        status: s || undefined,
+      }),
+    );
   }
 
   useEffect(() => {
@@ -34,39 +29,12 @@ export default function WarehousePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function markLoaded(id: string) {
-    await fetch('/api/installs/loaded', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    await load();
-  }
-
-  async function clearLoaded(id: string) {
-    await fetch('/api/installs/loaded', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    });
-    await load();
-  }
-
-  async function setInstallStatus(id: string, next: string) {
-    await fetch(`/api/installs/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: next }),
-    });
-    await load();
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Warehouse board</h1>
-          <p className="text-sm text-zinc-400">Installs ready to stage / load</p>
+          <p className="text-sm text-zinc-400">Installs ready to stage / load (static seed)</p>
         </div>
         <div className="flex flex-wrap gap-2">
           {(['today', 'upcoming', 'all'] as const).map((f) => (
@@ -100,9 +68,7 @@ export default function WarehousePage() {
       </div>
 
       {rows.length === 0 ? (
-        <p className="text-sm text-zinc-500">
-          No installs. <a className="text-emerald-400 underline" href="/api/demo/seed">Seed demo</a>
-        </p>
+        <p className="text-sm text-zinc-500">No installs for this filter.</p>
       ) : (
         <ul className="space-y-3">
           {rows.map((r) => (
@@ -124,33 +90,48 @@ export default function WarehousePage() {
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
-                  onClick={() => setInstallStatus(r.id, 'Ready')}
+                  onClick={() => {
+                    updateInstall(r.id, { status: 'Ready' });
+                    load();
+                  }}
                   className="rounded-md bg-emerald-800/80 px-3 py-1 text-xs hover:bg-emerald-700"
                 >
                   Ready
                 </button>
                 <button
-                  onClick={() => setInstallStatus(r.id, 'NotReady')}
+                  onClick={() => {
+                    updateInstall(r.id, { status: 'NotReady' });
+                    load();
+                  }}
                   className="rounded-md bg-rose-900/70 px-3 py-1 text-xs hover:bg-rose-800"
                 >
                   NotReady
                 </button>
                 <button
-                  onClick={() => setInstallStatus(r.id, 'Pending')}
+                  onClick={() => {
+                    updateInstall(r.id, { status: 'Pending' });
+                    load();
+                  }}
                   className="rounded-md bg-zinc-800 px-3 py-1 text-xs hover:bg-zinc-700"
                 >
                   Pending
                 </button>
                 {r.loadedAt ? (
                   <button
-                    onClick={() => clearLoaded(r.id)}
+                    onClick={() => {
+                      clearLoaded(r.id);
+                      load();
+                    }}
                     className="rounded-md border border-zinc-700 px-3 py-1 text-xs"
                   >
                     Clear loaded
                   </button>
                 ) : (
                   <button
-                    onClick={() => markLoaded(r.id)}
+                    onClick={() => {
+                      markLoaded(r.id);
+                      load();
+                    }}
                     className="rounded-md border border-emerald-700 px-3 py-1 text-xs text-emerald-300"
                   >
                     Mark loaded

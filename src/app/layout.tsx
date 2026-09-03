@@ -30,6 +30,8 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+const BASE = '/sold-equipment';
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
@@ -38,7 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(()=>{});}`,
+            __html: `if('serviceWorker' in navigator){navigator.serviceWorker.register('${BASE}/sw.js').catch(()=>{});}`,
           }}
         />
       </body>
