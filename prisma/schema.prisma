@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model SoldEstimate {
+  id                 String   @id @default(cuid())
+  estimateId         String   @unique
+  locationName       String
+  jobNumber          String?
+  skus               String
+  serviceDescription String?
+  installType        String?
+  tonnage            String?
+  total              Float?
+  statusOps          String   @default("pending")
+  statusWarehouse    String   @default("pending")
+  statusReq          String   @default("pending")
+  decisionReasons    String
+  warehouseHint      String?
+  a2lFlag            Boolean  @default(false)
+  slackTs            String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  install            Install?
+}
+
+model Install {
+  id               String        @id @default(cuid())
+  estimateId       String?       @unique
+  soldEstimateId   String?       @unique
+  soldEstimate     SoldEstimate? @relation(fields: [soldEstimateId], references: [id])
+  equipment        String
+  customer         String
+  dateApproved     DateTime      @default(now())
+  status           String        @default("Pending")
+  loadedAt         DateTime?
+  installJobNumber String?
+  scheduledDate    DateTime?
+  assignedTechs    String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+}
+
+model RuleConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
