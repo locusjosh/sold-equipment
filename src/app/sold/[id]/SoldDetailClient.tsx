@@ -88,10 +88,25 @@ function PipelineStepper({ row }: { row: SoldRow }) {
 
 function isAutoReason(reason: string, statusOps: string) {
   const r = reason.toLowerCase();
-  if (r.includes('escalate') || r.includes('mismatch') || r.includes('unknown') || r.includes('not in')) {
+  if (
+    r.includes('escalate') ||
+    r.includes('mismatch') ||
+    r.includes('unknown') ||
+    r.includes('not in') ||
+    r.includes('conflicts with') ||
+    r.includes('not seen in property')
+  ) {
     return false;
   }
-  if (r.includes('safe') || r.includes('canonical') || r.includes('override') || r.includes('auto')) {
+  if (
+    r.includes('customer note match') ||
+    r.includes('property install history match') ||
+    r.includes('fallback: global safe pair') ||
+    r.includes('safe') ||
+    r.includes('canonical') ||
+    r.includes('override') ||
+    r.includes('auto')
+  ) {
     return true;
   }
   return statusOps === 'auto' || statusOps === 'approved';
@@ -171,6 +186,54 @@ export function SoldDetailClient() {
           {row.a2lFlag ? <StatusPill value="A2L sensor" /> : null}
         </div>
       </div>
+
+      {(row.customerNote || (row.customerNoteSkus && row.customerNoteSkus.length > 0)) ? (
+        <div className="rounded-xl border border-sky-900/50 bg-sky-950/20 p-4">
+          <h2 className="text-sm font-medium text-sky-300">Customer note</h2>
+          {row.customerNote ? (
+            <blockquote className="mt-2 border-l-2 border-sky-700/60 pl-3 text-sm italic text-zinc-300">
+              {row.customerNote}
+            </blockquote>
+          ) : null}
+          {row.customerNoteSkus && row.customerNoteSkus.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {row.customerNoteSkus.map((sku) => (
+                <span
+                  key={sku}
+                  className="rounded-md border border-sky-800/60 bg-zinc-950/80 px-2 py-1 font-mono text-xs text-sky-100"
+                >
+                  {sku}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {(row.historySummary || (row.historySets && row.historySets.length > 0)) ? (
+        <div className="rounded-xl border border-violet-900/50 bg-violet-950/20 p-4">
+          <h2 className="text-sm font-medium text-violet-300">Property history</h2>
+          {row.historySummary ? (
+            <p className="mt-2 text-sm text-zinc-300">{row.historySummary}</p>
+          ) : null}
+          {row.historySets && row.historySets.length > 0 ? (
+            <div className="mt-3 space-y-2">
+              {row.historySets.map((set, i) => (
+                <div key={i} className="flex flex-wrap gap-1.5">
+                  {set.map((sku) => (
+                    <span
+                      key={`${i}-${sku}`}
+                      className="rounded-md border border-violet-800/60 bg-zinc-950/80 px-2 py-1 font-mono text-xs text-violet-100"
+                    >
+                      {sku}
+                    </span>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="space-y-3">
         {autoReasons.length > 0 ? (

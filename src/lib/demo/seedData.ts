@@ -1,4 +1,5 @@
 import { evaluateAutoApprove } from '@/lib/rules/autoApprove';
+import { getPropertyProfile } from '@/lib/demo/propertyProfiles';
 
 export type SoldRow = {
   id: string;
@@ -18,6 +19,10 @@ export type SoldRow = {
   a2lFlag: boolean;
   slackTs: string | null;
   createdAt: string;
+  customerNote: string | null;
+  customerNoteSkus: string[];
+  historySummary: string | null;
+  historySets: string[][];
 };
 
 export type InstallRow = {
@@ -122,6 +127,12 @@ function buildSeed(): { sold: SoldRow[]; installs: InstallRow[] } {
   const now = new Date().toISOString();
 
   for (const row of RAW_SEED) {
+    const profile = getPropertyProfile(row.locationName);
+    const customerNote = profile?.customerNote ?? null;
+    const customerNoteSkus = profile?.customerNoteSkus ?? [];
+    const historySets = profile?.historySets ?? [];
+    const historySummary = profile?.historySummary ?? null;
+
     const decision = evaluateAutoApprove({
       locationName: row.locationName,
       jobNumber: row.jobNumber,
@@ -129,6 +140,9 @@ function buildSeed(): { sold: SoldRow[]; installs: InstallRow[] } {
       serviceDescription: row.serviceDescription,
       installType: row.installType,
       tonnage: row.tonnage,
+      customerNoteSkus: customerNoteSkus.length ? customerNoteSkus : null,
+      propertyHistorySets: historySets.length ? historySets : null,
+      propertyHistoryCount: profile?.historyCount ?? null,
     });
 
     const statusOps = decision.opsDecision === 'auto' ? 'auto' : 'escalate';
@@ -158,6 +172,10 @@ function buildSeed(): { sold: SoldRow[]; installs: InstallRow[] } {
       a2lFlag: Boolean(decision.a2lFlag),
       slackTs: `${Date.now() / 1000}.seed`,
       createdAt: now,
+      customerNote,
+      customerNoteSkus,
+      historySummary,
+      historySets,
     });
 
     if (statusOps === 'auto') {

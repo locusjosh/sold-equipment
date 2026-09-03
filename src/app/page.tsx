@@ -44,7 +44,7 @@ export default function HomePage() {
         <p className="text-xs uppercase tracking-widest text-emerald-400/80">Static demo</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">Sold Equipment</h1>
         <p className="mt-2 max-w-xl text-sm text-zinc-400">
-          Auto-approve SAFE pairs, review escalations, stage warehouse installs.
+          Property-first auto-approve from customer notes + install history; global SAFE pairs are a weak fallback. Review escalations, stage warehouse installs.
         </p>
 
         <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -105,7 +105,7 @@ export default function HomePage() {
       <section className="grid gap-3 sm:grid-cols-3">
         {[
           { title: '1. Seed', body: 'Eight demo estimates scored by the v1 rule engine.' },
-          { title: '2. Ops', body: 'SAFE pairs auto-approve; Hue97 / Indigo escalate.' },
+          { title: '2. Ops', body: 'Note + history first; SAFE pairs only as fallback; Hue97 / Indigo escalate.' },
           { title: '3. Warehouse', body: 'Mark loaded / ready — saved in localStorage.' },
         ].map((c) => (
           <div key={c.title} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">

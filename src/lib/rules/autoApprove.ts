@@ -1,5 +1,6 @@
 /**
  * Sold Equipment auto-approve rule engine v1
+ * Property-first: customer note → install history → weak global SAFE fallback
  * See docs/docs-auto-approve-v1.md
  */
 
@@ -14,6 +15,12 @@ export interface AutoApproveInput {
   serviceDescription?: string | null;
   installType?: string | null;
   tonnage?: string | number | null;
+  /** Models required / allowed from ST customer/location note */
+  customerNoteSkus?: string[] | null;
+  /** Past approved SKU sets at this property */
+  propertyHistorySets?: string[][] | null;
+  /** Optional count of prior installs (for reason text) */
+  propertyHistoryCount?: number | null;
 }
 
 export interface AutoApproveResult {
@@ -24,7 +31,7 @@ export interface AutoApproveResult {
   matchedRule?: string;
 }
 
-/** Canonical SC Ceiling pairs by tonnage */
+/** Canonical SC Ceiling pairs by tonnage — weak global fallback only */
 export const CANONICAL_PAIRS: Record<
   string,
   { condenser: string; ah: string[]; label: string }
@@ -46,6 +53,7 @@ export const CANONICAL_PAIRS: Record<
   },
 };
 
+/** @deprecated Prefer property note + history; kept for display of fallback pairs */
 export const HIGH_VOLUME_PROPERTIES = [
   'rise',
   'clifford',
@@ -70,6 +78,27 @@ export const HIGH_VOLUME_PROPERTIES = [
   'renue',
   'la costa',
 ];
+
+/**
+ * Parse free-text ST customer/location note into equipment model SKUs.
+ * Matches uppercase HVAC model tokens (GLXS*, GLZS*, A5AC*, FMA5*, AWST*, HXS, etc.).
+ */
+export function parseCustomerNoteSkus(note: string | null | undefined): string[] {
+  if (!note || !String(note).trim()) return [];
+  const upper = String(note).toUpperCase();
+  const re =
+    /\b(?:GLXS[A-Z0-9]{4,}|GLZS[A-Z0-9]{4,}|A5AC[A-Z0-9]{2,}|FMA5X[A-Z0-9]{3,}|AWST[A-Z0-9]{4,}|A4AH4P[A-Z0-9]{2,}|\d{2}HXS?\d{1,3}[A-Z]?)\b/g;
+  const found = upper.match(re) || [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of found) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
 
 function normalizeSkus(skus: string[]): string[] {
   return skus
@@ -141,6 +170,19 @@ function setsEqual(a: string[], b: string[]): boolean {
   return sa.every((v, i) => v === sb[i]);
 }
 
+function isSubset(sold: string[], allowed: string[]): boolean {
+  const allow = new Set(normalizeSkus(allowed));
+  return sold.length > 0 && sold.every((s) => allow.has(s));
+}
+
+function noteHasA5ac(noteSkus: string[] | null | undefined): boolean {
+  return (noteSkus || []).some((s) => String(s).toUpperCase().startsWith('A5AC'));
+}
+
+function historyHasA5ac(sets: string[][] | null | undefined): boolean {
+  return (sets || []).some((set) => set.some((s) => String(s).toUpperCase().startsWith('A5AC')));
+}
+
 function matchCanonicalPair(skus: string[]): { tonnage: string; label: string } | null {
   for (const [tons, pair] of Object.entries(CANONICAL_PAIRS)) {
     for (const ah of pair.ah) {
@@ -150,11 +192,6 @@ function matchCanonicalPair(skus: string[]): { tonnage: string; label: string } 
     }
   }
   return null;
-}
-
-function isHighVolumeProperty(locationName: string): boolean {
-  const l = loc(locationName);
-  return HIGH_VOLUME_PROPERTIES.some((p) => l.includes(p));
 }
 
 function detectInstallType(input: AutoApproveInput, skus: string[]): string {
@@ -177,16 +214,31 @@ function hue97Preferred(skus: string[]): boolean {
   return false;
 }
 
+function hasNote(input: AutoApproveInput): boolean {
+  return Array.isArray(input.customerNoteSkus) && input.customerNoteSkus.length > 0;
+}
+
+function hasHistory(input: AutoApproveInput): boolean {
+  return Array.isArray(input.propertyHistorySets) && input.propertyHistorySets.length > 0;
+}
+
 export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult {
   const reasons: string[] = [];
   const skus = normalizeSkus(input.skus || []);
   const locationName = input.locationName || '';
   const jobNumber = (input.jobNumber || '').trim();
+  const noteSkus = normalizeSkus(input.customerNoteSkus || []);
+  const historySets = (input.propertyHistorySets || []).map((set) => normalizeSkus(set));
+  const historyCount =
+    input.propertyHistoryCount != null && input.propertyHistoryCount > 0
+      ? input.propertyHistoryCount
+      : historySets.length;
 
   if (!jobNumber || /^#?n\/?a$/i.test(jobNumber)) {
     reasons.push('Job is N/A (normal — does not block auto-approve)');
   }
 
+  // 1. Empty skus → escalate
   if (skus.length === 0) {
     return {
       opsDecision: 'escalate',
@@ -199,7 +251,66 @@ export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult 
   const installType = detectInstallType(input, skus);
   const declaredTons = parseDeclaredTonnage(input.tonnage);
   const skuTons = detectTonnageFromSkus(skus);
+  const notePresent = hasNote(input);
+  const historyPresent = hasHistory(input);
 
+  // 2–3. Customer note (property-first)
+  if (notePresent) {
+    if (isSubset(skus, noteSkus)) {
+      reasons.push(
+        `Customer note match: sold=[${skus.join(', ')}] ⊆ note=[${noteSkus.join(', ')}]`,
+      );
+      return {
+        opsDecision: 'auto',
+        warehouseHint: isHue97(locationName) && noteHasA5ac(noteSkus) ? 'special-order' : 'auto',
+        reasons,
+        a2lFlag:
+          (isRiseBroadway(locationName) || isRiseCondenserProperty(locationName)) &&
+          skus.length === 1 &&
+          skus[0] === 'GLXS4BA2410A',
+        matchedRule: 'customer-note-match',
+      };
+    }
+    reasons.push(
+      `Conflicts with property customer note: note=[${noteSkus.join(', ')}] sold=[${skus.join(', ')}]`,
+    );
+    return {
+      opsDecision: 'escalate',
+      warehouseHint: 'check',
+      reasons,
+      matchedRule: 'customer-note-conflict',
+    };
+  }
+
+  // 4–5. Property install history
+  if (historyPresent) {
+    const matched = historySets.some((set) => setsEqual(skus, set));
+    if (matched) {
+      reasons.push(`Property install history match (${historyCount} prior installs)`);
+      return {
+        opsDecision: 'auto',
+        warehouseHint:
+          isHue97(locationName) && historyHasA5ac(input.propertyHistorySets)
+            ? 'special-order'
+            : 'auto',
+        reasons,
+        a2lFlag:
+          (isRiseBroadway(locationName) || isRiseCondenserProperty(locationName)) &&
+          skus.length === 1 &&
+          skus[0] === 'GLXS4BA2410A',
+        matchedRule: 'property-history-match',
+      };
+    }
+    reasons.push('Sold SKUs not seen in property install history');
+    return {
+      opsDecision: 'escalate',
+      warehouseHint: 'check',
+      reasons,
+      matchedRule: 'property-history-miss',
+    };
+  }
+
+  // 6. Hard escalates (only when no note and no history)
   if (isIndigo(locationName) || hasGlzs(skus) || /hp\s*closet/i.test(installType)) {
     reasons.push('Indigo / GLZS* / HP Closet requires supervisor review');
     return {
@@ -210,6 +321,19 @@ export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult 
     };
   }
 
+  if (declaredTons !== null && skuTons !== null && declaredTons !== skuTons) {
+    reasons.push(
+      `Tonnage mismatch: line=${declaredTons}T vs SKU-encoded=${skuTons}T`,
+    );
+    return {
+      opsDecision: 'escalate',
+      warehouseHint: 'check',
+      reasons,
+      matchedRule: 'tonnage-mismatch',
+    };
+  }
+
+  // 7. Hue97 — note/history already handled above; here prefer existing A5AC logic
   if (isHue97(locationName)) {
     if (hue97Preferred(skus)) {
       reasons.push('Hue97 preferred 454B A5AC + matching HXS — ops auto');
@@ -232,13 +356,14 @@ export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult 
     };
   }
 
+  // 8. Fallback: global SAFE pairs / location overrides (no note and no history only)
   if (
     (isRiseBroadway(locationName) || isRiseCondenserProperty(locationName)) &&
     skus.length === 1 &&
     skus[0] === 'GLXS4BA2410A'
   ) {
     reasons.push(
-      'Rise condenser-only GLXS4BA2410A — ops auto; queue A2L sensor add'
+      'Fallback: global SAFE pair — Rise condenser-only GLXS4BA2410A; flag A2L sensor add',
     );
     return {
       opsDecision: 'auto',
@@ -250,7 +375,7 @@ export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult 
   }
 
   if (isParkMesa(locationName) && setsEqual(skus, ['A5AC4024', 'FMA5X2400AL'])) {
-    reasons.push('Park Mesa wall override A5AC4024 + FMA5X2400AL');
+    reasons.push('Fallback: global SAFE pair — Park Mesa wall A5AC4024 + FMA5X2400AL');
     return {
       opsDecision: 'auto',
       warehouseHint: 'auto',
@@ -260,7 +385,7 @@ export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult 
   }
 
   if (isGriffin(locationName) && setsEqual(skus, ['AWST24SU1305', 'GLXS4BA2410A'])) {
-    reasons.push('Griffin wall override GLXS4BA2410A + AWST24SU1305');
+    reasons.push('Fallback: global SAFE pair — Griffin wall GLXS4BA2410A + AWST24SU1305');
     return {
       opsDecision: 'auto',
       warehouseHint: 'auto',
@@ -288,23 +413,11 @@ export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult 
     };
   }
 
-  if (declaredTons !== null && skuTons !== null && declaredTons !== skuTons) {
-    reasons.push(
-      `Tonnage mismatch: line=${declaredTons}T vs SKU-encoded=${skuTons}T`
-    );
-    return {
-      opsDecision: 'escalate',
-      warehouseHint: 'check',
-      reasons,
-      matchedRule: 'tonnage-mismatch',
-    };
-  }
-
   const canonical = matchCanonicalPair(skus);
   if (canonical) {
     if (declaredTons !== null && Number(canonical.tonnage) !== declaredTons) {
       reasons.push(
-        `Tonnage mismatch: line=${declaredTons}T vs pair=${canonical.tonnage}T`
+        `Tonnage mismatch: line=${declaredTons}T vs pair=${canonical.tonnage}T`,
       );
       return {
         opsDecision: 'escalate',
@@ -314,16 +427,14 @@ export function evaluateAutoApprove(input: AutoApproveInput): AutoApproveResult 
       };
     }
 
-    const hv = isHighVolumeProperty(locationName);
     reasons.push(
-      `SAFE canonical ${canonical.label} (${skus.join(' + ')})` +
-        (hv ? ' at high-volume property' : '; property not in high-volume list (still auto via global pairs)')
+      `Fallback: global SAFE pair — ${canonical.label} (${skus.join(' + ')})`,
     );
     return {
       opsDecision: 'auto',
       warehouseHint: 'auto',
       reasons,
-      matchedRule: hv ? `canonical-${canonical.tonnage}t` : `canonical-${canonical.tonnage}t-global`,
+      matchedRule: `canonical-${canonical.tonnage}t-fallback`,
     };
   }
 
@@ -343,4 +454,10 @@ export function formatCanonicalPairsForDisplay() {
     airHandlers: p.ah,
     label: p.label,
   }));
+}
+
+/** @deprecated use loc matching via property profiles */
+export function isHighVolumeProperty(locationName: string): boolean {
+  const l = loc(locationName);
+  return HIGH_VOLUME_PROPERTIES.some((p) => l.includes(p));
 }
