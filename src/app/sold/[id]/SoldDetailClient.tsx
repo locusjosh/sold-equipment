@@ -2,9 +2,100 @@
 
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StatusPill } from '@/components/StatusPill';
 import { decideSold, getSoldById, type SoldRow } from '@/lib/demo/store';
+
+function stepState(current: string, doneValues: string[], activeValues: string[]) {
+  if (doneValues.includes(current)) return 'done' as const;
+  if (activeValues.includes(current)) return 'current' as const;
+  return 'todo' as const;
+}
+
+function PipelineStepper({ row }: { row: SoldRow }) {
+  const ops = stepState(
+    row.statusOps,
+    ['auto', 'approved'],
+    ['escalate', 'pending'],
+  );
+  const wh = stepState(
+    row.statusWarehouse,
+    ['ready', 'auto', 'done'],
+    ['pending', 'not_ready'],
+  );
+  // Treat req as current only after ops cleared and warehouse not still pending-only gate
+  const opsDone = ops === 'done';
+  const req =
+    row.statusReq === 'done' || row.statusReq === 'approved'
+      ? ('done' as const)
+      : opsDone
+        ? ('current' as const)
+        : ('todo' as const);
+
+  // Clarify warehouse current: if ops not done, warehouse is todo
+  const whFinal = !opsDone ? ('todo' as const) : wh === 'todo' ? ('current' as const) : wh;
+
+  const steps = [
+    { key: 'Ops', state: ops === 'todo' && row.statusOps === 'escalate' ? ('current' as const) : ops },
+    { key: 'Warehouse', state: whFinal },
+    { key: 'Requisition', state: req },
+  ];
+
+  // Ensure exactly one current when escalate
+  const hasCurrent = steps.some((s) => s.state === 'current');
+  if (!hasCurrent) {
+    const firstTodo = steps.find((s) => s.state === 'todo');
+    if (firstTodo) firstTodo.state = 'current';
+  }
+
+  return (
+    <ol className="flex items-center gap-1 rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+      {steps.map((s, i) => (
+        <li key={s.key} className="flex flex-1 items-center gap-1">
+          <div className="flex min-w-0 flex-1 flex-col items-center gap-1 text-center">
+            <span
+              className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-semibold ${
+                s.state === 'done'
+                  ? 'bg-emerald-600 text-white'
+                  : s.state === 'current'
+                    ? 'bg-amber-500 text-zinc-950 ring-2 ring-amber-300/40'
+                    : 'bg-zinc-800 text-zinc-500'
+              }`}
+            >
+              {s.state === 'done' ? '✓' : i + 1}
+            </span>
+            <span
+              className={`truncate text-[11px] font-medium ${
+                s.state === 'current' ? 'text-amber-200' : s.state === 'done' ? 'text-emerald-300' : 'text-zinc-500'
+              }`}
+            >
+              {s.key}
+            </span>
+          </div>
+          {i < steps.length - 1 ? (
+            <div
+              className={`mb-4 h-0.5 w-4 shrink-0 sm:w-8 ${
+                s.state === 'done' ? 'bg-emerald-700' : 'bg-zinc-800'
+              }`}
+              aria-hidden
+            />
+          ) : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function isAutoReason(reason: string, statusOps: string) {
+  const r = reason.toLowerCase();
+  if (r.includes('escalate') || r.includes('mismatch') || r.includes('unknown') || r.includes('not in')) {
+    return false;
+  }
+  if (r.includes('safe') || r.includes('canonical') || r.includes('override') || r.includes('auto')) {
+    return true;
+  }
+  return statusOps === 'auto' || statusOps === 'approved';
+}
 
 export function SoldDetailClient() {
   const params = useParams<{ id: string }>();
@@ -21,6 +112,14 @@ export function SoldDetailClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
+  const opsCleared = useMemo(
+    () => row != null && (row.statusOps === 'auto' || row.statusOps === 'approved'),
+    [row],
+  );
+
+  const showOpsActions =
+    row != null && (row.statusOps === 'escalate' || row.statusOps === 'pending');
+
   function decide(action: string) {
     setBusy(true);
     decideSold(params.id, action);
@@ -33,22 +132,36 @@ export function SoldDetailClient() {
     return <p className="text-sm text-zinc-500">Loading or not found…</p>;
   }
 
+  const autoReasons = row.decisionReasons.filter((r) => isAutoReason(r, row.statusOps));
+  const escalateReasons = row.decisionReasons.filter((r) => !isAutoReason(r, row.statusOps));
+
   return (
-    <div className="space-y-6">
-      <Link href="/sold" className="text-sm text-zinc-400 hover:text-white">
+    <div className="space-y-5 pb-4">
+      <Link href="/sold" className="tap-target inline-flex items-center text-sm text-zinc-400 hover:text-white">
         ← Back to queue
       </Link>
+
+      <PipelineStepper row={row} />
+
       <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
         <h1 className="text-2xl font-semibold">{row.locationName}</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Est #{row.estimateId} · Job {row.jobNumber || 'N/A'} ·{' '}
-          {row.installType || 'type n/a'}
+          Est #{row.estimateId} · Job {row.jobNumber || 'N/A'} · {row.installType || 'type n/a'}
           {row.tonnage ? ` · ${row.tonnage}T` : ''}
           {row.total != null ? ` · $${row.total}` : ''}
         </p>
-        <p className="mt-2 font-mono text-sm">{row.skus.join(' + ')}</p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {row.skus.map((sku) => (
+            <span
+              key={sku}
+              className="rounded-md border border-zinc-700 bg-zinc-950/80 px-2 py-1 text-xs text-zinc-200"
+            >
+              {sku}
+            </span>
+          ))}
+        </div>
         {row.serviceDescription ? (
-          <p className="mt-2 text-sm text-zinc-400">{row.serviceDescription}</p>
+          <p className="mt-3 text-sm text-zinc-400">{row.serviceDescription}</p>
         ) : null}
         <div className="mt-4 flex flex-wrap gap-2">
           <StatusPill label="Ops" value={row.statusOps} />
@@ -59,47 +172,71 @@ export function SoldDetailClient() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-zinc-800 p-4">
-        <h2 className="font-medium">Decision reasons</h2>
-        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-300">
-          {row.decisionReasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
+      <div className="space-y-3">
+        {autoReasons.length > 0 ? (
+          <div className="rounded-xl border border-emerald-900/60 bg-emerald-950/20 p-4">
+            <h2 className="text-sm font-medium text-emerald-300">Why auto</h2>
+            <ul className="mt-2 space-y-1.5 text-sm text-emerald-100/90">
+              {autoReasons.map((r) => (
+                <li key={r} className="flex gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                  <span>{r}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {escalateReasons.length > 0 ? (
+          <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-4">
+            <h2 className="text-sm font-medium text-amber-300">Why escalate</h2>
+            <ul className="mt-2 space-y-1.5 text-sm text-amber-100/90">
+              {escalateReasons.map((r) => (
+                <li key={r} className="flex gap-2">
+                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                  <span>{r}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          disabled={busy}
-          onClick={() => decide('approve')}
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium hover:bg-emerald-600 disabled:opacity-50"
-        >
-          Approve (ops)
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => decide('decline')}
-          className="rounded-lg bg-rose-800 px-4 py-2 text-sm font-medium hover:bg-rose-700 disabled:opacity-50"
-        >
-          Decline
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => decide('ready')}
-          className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800 disabled:opacity-50"
-        >
-          Warehouse Ready
-        </button>
-        <button
-          disabled={busy}
-          onClick={() => decide('not_ready')}
-          className="rounded-lg border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-800 disabled:opacity-50"
-        >
-          Not Ready
-        </button>
-      </div>
-      {row.slackTs ? (
-        <p className="text-xs text-zinc-500">Slack ts (dry-run ok): {row.slackTs}</p>
+      {opsCleared ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            disabled={busy}
+            onClick={() => decide('ready')}
+            className="tap-target rounded-xl border border-emerald-700 bg-emerald-950/40 px-4 text-sm font-medium text-emerald-200 hover:bg-emerald-900/50 disabled:opacity-50"
+          >
+            Warehouse Ready
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => decide('not_ready')}
+            className="tap-target rounded-xl border border-zinc-700 px-4 text-sm hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Not Ready
+          </button>
+        </div>
+      ) : null}
+
+      {showOpsActions ? (
+        <div className="sticky-actions flex gap-2">
+          <button
+            disabled={busy}
+            onClick={() => decide('approve')}
+            className="tap-target flex-1 rounded-xl bg-emerald-600 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            Approve
+          </button>
+          <button
+            disabled={busy}
+            onClick={() => decide('decline')}
+            className="tap-target flex-1 rounded-xl bg-rose-800 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+          >
+            Decline
+          </button>
+        </div>
       ) : null}
     </div>
   );

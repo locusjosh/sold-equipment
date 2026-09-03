@@ -1,88 +1,132 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StatusPill } from '@/components/StatusPill';
 import { getSoldRows, type SoldRow } from '@/lib/demo/store';
 
+type Chip = 'all' | 'auto' | 'escalate' | 'approved';
+
+const CHIPS: { id: Chip; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'auto', label: 'Auto' },
+  { id: 'escalate', label: 'Needs review' },
+  { id: 'approved', label: 'Approved' },
+];
+
+function railClass(statusOps: string) {
+  if (statusOps === 'auto' || statusOps === 'approved') return 'bg-emerald-500';
+  if (statusOps === 'escalate') return 'bg-amber-500';
+  if (statusOps === 'declined') return 'bg-rose-500';
+  return 'bg-zinc-600';
+}
+
+function readChipFromUrl(): Chip {
+  if (typeof window === 'undefined') return 'all';
+  const v = new URLSearchParams(window.location.search).get('chip');
+  if (v === 'auto' || v === 'escalate' || v === 'approved') return v;
+  return 'all';
+}
+
 export default function SoldQueuePage() {
   const [rows, setRows] = useState<SoldRow[]>([]);
-  const [statusOps, setStatusOps] = useState('');
+  const [chip, setChip] = useState<Chip>('all');
   const [q, setQ] = useState('');
   const [loading, setLoading] = useState(true);
 
-  function load(nextQ = q, nextStatus = statusOps) {
-    setLoading(true);
-    setRows(getSoldRows({ q: nextQ || undefined, statusOps: nextStatus || undefined }));
-    setLoading(false);
-  }
-
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setChip(readChipFromUrl());
+    setRows(getSoldRows());
+    setLoading(false);
   }, []);
+
+  const filtered = useMemo(() => {
+    let list = rows;
+    if (chip !== 'all') {
+      list = list.filter((r) => r.statusOps === chip);
+    }
+    if (q.trim()) {
+      const needle = q.toLowerCase();
+      list = list.filter(
+        (r) =>
+          r.locationName.toLowerCase().includes(needle) ||
+          r.estimateId.toLowerCase().includes(needle) ||
+          r.skus.some((s) => s.toLowerCase().includes(needle)),
+      );
+    }
+    return list;
+  }, [rows, chip, q]);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Sold queue</h1>
-          <p className="text-sm text-zinc-400">Ops accuracy gate — auto vs escalate (static seed)</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search location / estimate"
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"
-          />
-          <select
-            value={statusOps}
-            onChange={(e) => setStatusOps(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm"
-          >
-            <option value="">All statuses</option>
-            <option value="auto">auto</option>
-            <option value="escalate">escalate</option>
-            <option value="approved">approved</option>
-            <option value="declined">declined</option>
-            <option value="pending">pending</option>
-          </select>
+      <div>
+        <h1 className="text-2xl font-semibold">Sold queue</h1>
+        <p className="text-sm text-zinc-400">Ops accuracy gate</p>
+      </div>
+
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search location / estimate / SKU"
+        className="w-full rounded-xl border border-zinc-700 bg-zinc-900 px-3 text-sm"
+        autoComplete="off"
+      />
+
+      <div className="flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {CHIPS.map((c) => (
           <button
-            onClick={() => load()}
-            className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium hover:bg-emerald-600"
+            key={c.id}
+            type="button"
+            onClick={() => setChip(c.id)}
+            className={`tap-target shrink-0 rounded-full px-4 text-sm font-medium ${
+              chip === c.id
+                ? 'bg-emerald-700 text-white'
+                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+            }`}
           >
-            Filter
+            {c.label}
           </button>
-        </div>
+        ))}
       </div>
 
       {loading ? (
         <p className="text-sm text-zinc-500">Loading…</p>
-      ) : rows.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <p className="text-sm text-zinc-500">No rows match filters.</p>
       ) : (
         <ul className="space-y-3">
-          {rows.map((r) => (
+          {filtered.map((r) => (
             <li key={r.id}>
               <Link
                 href={`/sold/${r.id}`}
-                className="block rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 hover:border-zinc-600"
+                className="tap-target relative flex overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60 hover:border-zinc-600"
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
+                <span className={`w-1.5 shrink-0 ${railClass(r.statusOps)}`} aria-hidden />
+                <div className="flex flex-1 flex-wrap items-start justify-between gap-2 p-4">
+                  <div className="min-w-0 flex-1">
                     <div className="font-medium">{r.locationName}</div>
                     <div className="mt-1 text-xs text-zinc-400">
                       Est #{r.estimateId} · Job {r.jobNumber || 'N/A'}
                       {r.total != null ? ` · $${r.total}` : ''}
-                      {r.a2lFlag ? ' · A2L flag' : ''}
+                      {r.a2lFlag ? ' · A2L' : ''}
                     </div>
-                    <div className="mt-2 font-mono text-xs text-zinc-300">{r.skus.join(' + ')}</div>
+                    {r.decisionReasons[0] ? (
+                      <p className="mt-2 text-sm text-zinc-300 line-clamp-2">{r.decisionReasons[0]}</p>
+                    ) : null}
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {r.skus.map((sku) => (
+                        <span
+                          key={sku}
+                          className="rounded-md border border-zinc-700 bg-zinc-950/80 px-2 py-0.5 text-[11px] text-zinc-200"
+                        >
+                          {sku}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-1">
                     <StatusPill label="Ops" value={r.statusOps} />
                     <StatusPill label="WH" value={r.statusWarehouse} />
-                    <StatusPill label="Req" value={r.statusReq} />
                   </div>
                 </div>
               </Link>
